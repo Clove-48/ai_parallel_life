@@ -619,34 +619,11 @@ const ChatPage = {
               storyData.chatMessages = this.messages.slice();
             }
             storyData.fields = { ...this.fields };
-            // 保存到本地 Store
-            // 后端 /api/generate 在 done 时已经写入数据库，
-            // 这里保存本地副本；同时显式再调一次 saveStory 作为兜底，
-            // 让 /api/stories 列表能直接看到（不会因 generate 失败而缺失）
+            // 后端 /api/generate 在 done 时已经写入数据库 — 这里只更新本地 Store
+            // （不再额外调 API.saveStory，避免同一会话产生 2 条历史记录）
             Store.addStory(storyData);
             Store.setCurrentStoryId(storyData.id);
             Store.setCurrentNarratives(storyData.narratives);
-            // 兜底：显式调用 POST /api/stories，让历史记录在数据库中可查
-            // （generate 失败/旧版本未写库时也能补救）
-            API.saveStory({
-              userInput: {
-                time: storyData.node?.time || '',
-                location: storyData.node?.location || '',
-                choiceA: storyData.node?.choiceA || '',
-                choiceB: storyData.node?.choiceB || '',
-                actualChoice: storyData.node?.actualChoice || '',
-                actualOutcome: storyData.node?.actualOutcome || '',
-                imagination: storyData.node?.imagination || '',
-                uploadedMedia: storyData.node?.uploadedMedia || [],
-              },
-            }).then(saved => {
-              // 后端可能返回新 id；以数据库 id 为准同步本地
-              if (saved && saved.id && saved.id !== storyData.id) {
-                storyData.id = saved.id;
-                Store.addStory(storyData);
-                Store.setCurrentStoryId(saved.id);
-              }
-            }).catch(() => { /* 静默：本地已有，不阻塞流程 */ });
             // 内联展示结果
             if (statusBubble.parentNode) statusBubble.remove();
             this._showNarrativeInline(container, storyData);

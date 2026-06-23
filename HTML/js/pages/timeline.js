@@ -79,11 +79,39 @@ const TimelinePage = {
   },
 
   /** 渲染聊天记录回看区（折叠样式）
-   *  老数据没有 chatMessages 字段时，用 node（用户原始输入）做降级展示
+   * 老数据没有 chatMessages 字段时，用 node（用户原始输入）做降级展示
+   *
+   * 用户消息中可能包含 attachments（图片/音频），需要在回看中展示，
+   * 否则聊天记录会"空一块"内容
    */
   _renderChatSection(story) {
     const messages = (story && story.chatMessages) || [];
     if (messages.length) {
+      // 渲染每条消息；用户消息的 attachments 也要展示（图片/音频）
+      const renderedMessages = messages.map(m => {
+        const role = m.role === 'assistant' ? 'ai' : m.role;
+        const avatar = role === 'ai' ? '✦' : '☾';
+        let bubbleInner;
+        if (role === 'user') {
+          // 用户消息：文字 + 附件（图片/音频）
+          const text = m.content ? this._escapeHtml(m.content) : '';
+          const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+          const mediaHtml = attachments
+            .filter(a => a && a.url)
+            .map(a => this._renderChatAttachment(a))
+            .join('');
+          bubbleInner = `${text.replace(/\n/g, '<br>')}${mediaHtml}`;
+        } else {
+          // AI 消息：纯文字
+          bubbleInner = this._escapeHtml(m.content || '').replace(/\n/g, '<br>');
+        }
+        return `
+          <div class="chat-history-msg ${role}">
+            <div class="chat-history-avatar">${avatar}</div>
+            <div class="chat-history-bubble">${bubbleInner}</div>
+          </div>
+        `;
+      }).join('');
       return `
         <div class="chat-history-section" id="chat-history-section">
           <button class="chat-history-toggle" id="chat-history-toggle">
@@ -93,12 +121,7 @@ const TimelinePage = {
           </button>
           <div class="chat-history-body" id="chat-history-body" style="display:none">
             <div class="chat-history-list">
-              ${messages.map(m => `
-                <div class="chat-history-msg ${m.role}">
-                  <div class="chat-history-avatar">${m.role === 'ai' ? '✦' : '☾'}</div>
-                  <div class="chat-history-bubble">${this._escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
-                </div>
-              `).join('')}
+              ${renderedMessages}
             </div>
           </div>
         </div>
@@ -136,6 +159,33 @@ const TimelinePage = {
         </div>
       </div>
     `;
+  },
+
+  /**
+   * 渲染一条聊天附件（图片/音频）— 聊天记录回看用
+   * 复用 chat.js 的展示样式，结构与 _addAttachmentMessage 保持一致
+   */
+  _renderChatAttachment(att) {
+    if (!att || !att.url) return '';
+    if (att.type === 'image') {
+      const src = this._escapeHtml(this._mediaUrl(att.url));
+      const name = this._escapeHtml(att.filename || '图片');
+      return `<div class="msg-attach msg-attach-image chat-history-attach"><img src="${src}" alt="${name}" loading="lazy" crossorigin="anonymous" onerror="this.parentNode.classList.add('img-failed');this.style.display='none'"></div>`;
+    }
+    if (att.type === 'audio') {
+      const src = this._escapeHtml(this._mediaUrl(att.url));
+      return `<div class="msg-attach msg-attach-audio chat-history-attach"><span class="msg-attach-icon">🎵</span><span class="msg-attach-name">${this._escapeHtml(att.filename || '语音')}</span><audio src="${src}" controls preload="none" crossorigin="anonymous"></audio></div>`;
+    }
+    return '';
+  },
+
+  /** 把后端相对路径（/uploads/...）转成可访问的绝对 URL */
+  _mediaUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    const apiBase = (window.API && window.API.BASE_URL) || 'http://localhost:8000/api';
+    const fileBase = apiBase.replace(/\/api\/?$/, '');
+    return `${fileBase}${url}`;
   },
 
   /** HTML 转义 */

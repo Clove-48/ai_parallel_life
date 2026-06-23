@@ -2903,6 +2903,31 @@ img { max-width: 100%; display: block; }
   color: var(--ink-strong);
 }
 
+/* 聊天记录回看中的附件（图片/音频）— 限制最大尺寸，避免撑破历史区 */
+.chat-history-attach {
+  margin-top: 0.5rem;
+}
+.chat-history-attach img {
+  max-width: 220px;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+  object-fit: cover;
+}
+.chat-history-attach.msg-attach-audio {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.chat-history-attach.msg-attach-audio audio {
+  width: 100%;
+  max-width: 260px;
+  margin-top: 0.3rem;
+}
+
 /* 老数据降级：关键信息摘要 */
 .chat-history-node-title {
   font-size: 0.95rem;
