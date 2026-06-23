@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environment
+backend/venv/
+backend/.venv/
+venv/
+.venv/
+env/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+backend/parallel_life.db
+backend/data/
+
+# Uploads (user data — sensitive)
+backend/uploads/
+uploads/
+
+# Logs
+*.log
+backend/server.log
+nocache.log
+backend/nocache.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# IDE
+.idea/
+.vscode/
+.trae/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build
+dist/
+build/
+*.egg
+
+# OS
+*.tmp
+*.bak
+*.swp
+
+# External / scratch resources
+awesome-design-md/
+backend/deepseek_test.json
+backend/feedback.jsonl

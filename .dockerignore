@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.git
+.gitignore
+*.md
+docs/
+.vscode/
+.trae/
+node_modules/
+.DS_Store
+test_*.py
+*.jsonl

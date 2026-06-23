@@ -1,0 +1,46 @@
+<!-- AI 平行人生 — SPA 应用 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>AI 平行人生</title>
+
+<!-- Preload critical fonts -->
+<link rel="preload" href="_shared/fonts/InstrumentSerif-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="_shared/fonts/WorkSans-Regular.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="_shared/fonts/WorkSans-Bold.ttf" as="font" type="font/ttf" crossorigin>
+
+<!-- Styles -->
+<link rel="stylesheet" href="css/style.css">
+
+<!-- Scripts: 工具层 -->
+<script src="js/utils/helpers.js"></script>
+<script src="js/store.js"></script>
+<script src="js/api.js"></script>
+<script src="js/router.js"></script>
+
+<!-- Scripts: 组件层 -->
+<script src="js/components/EntryAnimation.js" defer></script>
+<script src="js/components/CardFactory.js" defer></script>
+<script src="js/components/CanvasCard.js" defer></script>
+<script src="js/components/ShareSheet.js" defer></script>
+
+<!-- Scripts: 页面层 -->
+<script src="js/pages/home.js" defer></script>
+<script src="js/pages/chat.js" defer></script>
+<script src="js/pages/generating.js" defer></script>
+<script src="js/pages/timeline.js" defer></script>
+<script src="js/pages/card.js" defer></script>
+<script src="js/pages/history.js" defer></script>
+
+<!-- Scripts: 应用入口 -->
+<script src="js/app.js" defer></script>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+</html>
