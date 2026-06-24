@@ -83,6 +83,8 @@ const ChatPage = {
   mount() {
     this._pageUnmounted = false;
     this._hasResumed = false;
+    this._pendingStoryId = null;
+    this._isGenerating = false;
     this.messages = [];
     this.fields = {};
     this.isComplete = false;
@@ -277,36 +279,48 @@ const ChatPage = {
       (errMsg) => {
         if (timedOut || this._pageUnmounted) return;
         clearTimeout(timeoutId);
-        // API 不可用时给出"重试"和"切换降级"两个选项，不再静默降级
+        // 全局 toast 提醒（即使聊天内容很长，用户也能立刻注意到）
+        if (window.GlobalToast) {
+          window.GlobalToast.error('连接中断：' + (errMsg || '网络中断') + ' — 点击下方"重新连接"重试');
+        }
+        // AI 气泡内只显示错误提示
         bubble.innerHTML = `
           <div class="msg-avatar ai">✦</div>
           <div class="msg-bubble">
             <div class="msg-error">
               <div class="msg-error-text">${this._escapeHtml(errMsg || '网络中断')}</div>
-              <div class="msg-error-actions">
-                <button class="btn-retry" id="btn-greeting-retry" title="重新连接" aria-label="重新连接">
-                  <span class="retry-icon">↻</span>
-                </button>
-                <button class="btn-fallback-mode" id="btn-greeting-fallback" title="无网络也能用">
-                  使用降级模式
-                </button>
-              </div>
             </div>
           </div>
         `;
+        // "重新连接"按钮放在 AI 气泡后面（独立元素，醒目）
+        const retryWrap = document.createElement('div');
+        retryWrap.className = 'msg-retry-wrap msg-retry-after-bubble';
+        retryWrap.innerHTML = `
+          <button class="btn-retry-after btn-retry-pulse" id="btn-greeting-retry" title="重新连接" aria-label="重新连接">
+            <span class="retry-icon">↻</span>
+            <span>重新连接</span>
+          </button>
+          <button class="btn-fallback-mode" id="btn-greeting-fallback" title="无网络也能用">
+            使用降级模式
+          </button>
+        `;
+        // 插入到 AI 气泡后面
+        bubble.parentNode.insertBefore(retryWrap, bubble.nextSibling);
         // 重试
-        const retryBtn = bubble.querySelector('#btn-greeting-retry');
+        const retryBtn = retryWrap.querySelector('#btn-greeting-retry');
         if (retryBtn) {
           retryBtn.onclick = () => {
             bubble.remove();
+            retryWrap.remove();
             this._startConversation(container, input);
           };
         }
         // 降级
-        const fallbackBtn = bubble.querySelector('#btn-greeting-fallback');
+        const fallbackBtn = retryWrap.querySelector('#btn-greeting-fallback');
         if (fallbackBtn) {
           fallbackBtn.onclick = () => {
             bubble.remove();
+            retryWrap.remove();
             this._enterFallbackMode(container, input);
           };
         }
@@ -458,32 +472,32 @@ const ChatPage = {
         if (streamDone) return;
         // 流式失败：清空气泡内容 + 加重发按钮
         fullReply = '';
+        // 全局 toast 提醒（即使聊天内容很长也能立刻看到）
+        if (window.GlobalToast) {
+          window.GlobalToast.error('发送失败：' + (errMsg || '网络中断') + ' — 点击下方"重新发送"重试');
+        }
         contentDiv.innerHTML = `
           <div class="msg-error">
             <div class="msg-error-text">${this._escapeHtml(errMsg || '网络中断')}</div>
-            <div class="msg-error-actions">
-              <button class="btn-retry" id="btn-retry-msg" title="重新发送" aria-label="重新发送">
-                <span class="retry-icon">↻</span>
-              </button>
-            </div>
           </div>
         `;
+        // "重新发送"按钮放在 AI 气泡后面（独立元素，醒目）
+        const retryWrap = document.createElement('div');
+        retryWrap.className = 'msg-retry-wrap msg-retry-after-bubble';
+        retryWrap.innerHTML = `
+          <button class="btn-retry-after btn-retry-pulse" id="btn-retry-msg" title="重新发送" aria-label="重新发送">
+            <span class="retry-icon">↻</span>
+            <span>重新发送</span>
+          </button>
+        `;
+        bubble.parentNode.insertBefore(retryWrap, bubble.nextSibling);
         // 绑定重发
-        const retryBtn = contentDiv.querySelector('#btn-retry-msg');
+        const retryBtn = retryWrap.querySelector('#btn-retry-msg');
         if (retryBtn) {
           retryBtn.onclick = () => {
-            // 移除这个失败气泡
+            // 移除 AI 失败气泡和重试按钮
             bubble.remove();
-            // 从 messages 中移除最后一条 user 消息（因为没拿到 AI 回复）
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-              if (this.messages[i].role === 'user') {
-                this.messages.splice(i, 1);
-                break;
-              }
-            }
-            // 把用户消息重新加回数组 + 保存
-            this.messages.push({ role: 'user', content: text });
-            this._saveSession();
+            retryWrap.remove();
             // 重新走完整流程（用户气泡已存在于 DOM，只需重新请求 AI 回复）
             this._llmHandleStream(container, text);
           };
@@ -584,6 +598,13 @@ const ChatPage = {
 
   /** AI 收集完成后自动推演（在聊天页内联展示，不跳转） */
   async _autoGenerateNarrative(container) {
+    // 互斥锁：防止用户连续点击"重新推演"产生并发请求和重复记录
+    if (this._isGenerating) {
+      console.warn('[chat] 推演进行中，忽略重复触发');
+      return;
+    }
+    this._isGenerating = true;
+
     // 根据模式选择输入来源
     const userInput = this.isFallback
       ? this._buildUserInputFromFallback()
@@ -604,6 +625,23 @@ const ChatPage = {
           return false;
         };
 
+        // 清理所有与当前会话相关的占位/失败记录
+        // （无论这次成功还是失败，都不应该让历史里多出重复条目）
+        const cleanupAllDuplicates = () => {
+          // 1) 删掉 _pendingStoryId 指向的那条（如果有）
+          if (this._pendingStoryId) {
+            Store.deleteStory(this._pendingStoryId);
+            this._pendingStoryId = null;
+          }
+          // 2) 兜底：把当前内容指纹下所有"待推演"占位全删掉
+          const fp = this._storyFingerprint();
+          if (fp) {
+            Store.getStories()
+              .filter(s => s && s._pending && this._storyFingerprint(s) === fp)
+              .forEach(s => Store.deleteStory(s.id));
+          }
+        };
+
         API.generateNarrativeStream(userInput, {
           onThinking: (msg) => {
             if (guard()) return;
@@ -614,13 +652,14 @@ const ChatPage = {
             if (_finished) return;
             if (guard()) return;
             // 把当时的聊天记录也附加到故事上 — 时间线页可回看对话
-            // 优先用后端返回的（如果后端在 done 里带了），否则用本地 messages
             if (!storyData.chatMessages || !storyData.chatMessages.length) {
               storyData.chatMessages = this.messages.slice();
             }
             storyData.fields = { ...this.fields };
+            // 关键：清理 pending 占位 + 任何与当前内容相同的占位
+            cleanupAllDuplicates();
             // 后端 /api/generate 在 done 时已经写入数据库 — 这里只更新本地 Store
-            // （不再额外调 API.saveStory，避免同一会话产生 2 条历史记录）
+            // （addStory 已按 id + 内容指纹双重去重，绝不会产生两条历史记录）
             Store.addStory(storyData);
             Store.setCurrentStoryId(storyData.id);
             Store.setCurrentNarratives(storyData.narratives);
@@ -646,7 +685,40 @@ const ChatPage = {
     } catch (e) {
       if (statusBubble.parentNode) statusBubble.remove();
       this._showGenerateError(container, '网络中断');
+    } finally {
+      this._isGenerating = false;
     }
+  },
+
+  /** 当前会话的故事指纹 — 用于匹配重复内容（与 Store 内部的去重逻辑保持一致） */
+  _storyFingerprint(story) {
+    if (!story) story = { node: this._buildUserInput(), title: this._deriveTitleFromMessages() };
+    if (story._pending) {
+      // pending 记录走它自己存的 _chatSession 数据
+      const session = story._chatSession || {};
+      const msgs = session.messages || [];
+      const userMsgs = msgs.filter(m => m.role === 'user');
+      const first = userMsgs[0] ? (userMsgs[0].content || '').replace(/<[^>]+>/g, '').trim() : '';
+      return `pending|${first}`;
+    }
+    const n = story.node || {};
+    const parts = [
+      n.time || '',
+      n.location || '',
+      n.choiceA || '',
+      n.choiceB || '',
+      n.actualChoice || '',
+      n.actualOutcome || '',
+      (story.title || '').replace(/\s+/g, ''),
+    ];
+    return parts.join('|');
+  },
+
+  /** 当前输入快照 */
+  _buildUserInput() {
+    return this.isFallback
+      ? this._buildUserInputFromFallback()
+      : this._buildUserInputFromLLM();
   },
 
   /** 显示推演状态气泡 */
@@ -1145,9 +1217,15 @@ const ChatPage = {
   _showGenerateError(container, errMsg) {
     this._saveSession();  // 推演失败也保存会话
 
+    // 全局 toast 提醒（推演失败时用户尤其需要明确反馈）
+    if (window.GlobalToast) {
+      window.GlobalToast.error('推演失败：' + (errMsg || '网络中断') + ' — 已保存当前进度，点击下方"重新推演"重试');
+    }
+
     // 将未完成的会话保存到历史列表，方便用户之后回来继续推演
     this._saveToHistory();
 
+    // AI 气泡内只显示错误提示
     const div = document.createElement('div');
     div.className = 'msg ai msg-generate-error';
     div.innerHTML = `
@@ -1155,22 +1233,28 @@ const ChatPage = {
       <div class="msg-bubble">
         <div class="msg-error">
           <div class="msg-error-text">${this._escapeHtml(errMsg || '网络中断')}</div>
-          <div class="msg-error-actions">
-            <button class="btn-retry" id="btn-retry-generate" title="重新推演" aria-label="重新推演">
-              <span class="retry-icon">↻</span>
-            </button>
-          </div>
         </div>
       </div>
     `;
     container.appendChild(div);
+    // "重新推演"按钮放在 AI 气泡后面（独立元素，醒目）
+    const retryWrap = document.createElement('div');
+    retryWrap.className = 'msg-retry-wrap msg-retry-after-bubble';
+    retryWrap.innerHTML = `
+      <button class="btn-retry-after btn-retry-pulse" id="btn-retry-generate" title="重新推演" aria-label="重新推演">
+        <span class="retry-icon">↻</span>
+        <span>重新推演</span>
+      </button>
+    `;
+    container.appendChild(retryWrap);
     this._scrollToBottom();
 
     // 绑定重试
-    const retryBtn = div.querySelector('#btn-retry-generate');
+    const retryBtn = retryWrap.querySelector('#btn-retry-generate');
     if (retryBtn) {
       retryBtn.onclick = () => {
         div.remove();
+        retryWrap.remove();
         this._autoGenerateNarrative(container);
       };
     }
@@ -1180,8 +1264,20 @@ const ChatPage = {
   _saveToHistory() {
     try {
       const title = this._deriveTitleFromMessages();
+      const fp = this._storyFingerprint();
+
+      // 关键：只清理"同一会话"（内容指纹相同）的旧 pending 故事
+      // 注意：不要无脑清理所有 pending — 会误删其他会话的占位
+      const existingPending = Store.getStories().filter(s => s && s._pending);
+      existingPending.forEach(s => {
+        // 同内容才清理；不同内容（其他会话）的 pending 保留
+        if (!fp || this._storyFingerprint(s) === fp) {
+          Store.deleteStory(s.id);
+        }
+      });
+
       const pendingStory = {
-        id: 'pending_' + Date.now(),
+        id: 'pending_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         title: title || '未完成的推演',
         _pending: true,
         _chatSession: {
@@ -1195,6 +1291,7 @@ const ChatPage = {
         },
         createdAt: new Date().toISOString(),
       };
+      this._pendingStoryId = pendingStory.id;
       Store.addStory(pendingStory);
     } catch (e) {
       console.warn('_saveToHistory failed:', e);
@@ -1224,6 +1321,8 @@ const ChatPage = {
   /** 卸载页面 — 中止挂起的请求 + 重置状态 */
   unmount() {
     this._pageUnmounted = true;
+    this._pendingStoryId = null;
+    this._isGenerating = false;
     if (this._initTimer) {
       clearTimeout(this._initTimer);
       this._initTimer = null;

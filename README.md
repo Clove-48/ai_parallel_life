@@ -178,6 +178,97 @@ python serve_nocache.py 5500
 
 ***
 
+## 重启服务
+
+修改了后端 Python 代码 → `uvicorn --reload` 会自动热重载，无需手动重启。
+修改了前端 JS/CSS → `serve_nocache.py` 也会自动给 HTML 注入新版本号，浏览器刷新即可，**但部分场景仍需手动重启**（见下表）。
+
+### 何时需要手动重启
+
+| 场景                                  | 是否需要手动重启                  |
+| ----------------------------------- | ------------------------- |
+| 后端 Python 文件（`backend/*.py`）        | ❌ 不需要（`--reload` 自动热重载）    |
+| 后端依赖（`requirements.txt` / `.env`）   | ✅ 需要重启                      |
+| 数据库结构变更（`models/` / `database.py`） | ✅ 需要重启                      |
+| 前端 JS/CSS（`HTML/js/`, `HTML/css/`）  | ❌ 不需要（自动注入版本号 + 浏览器刷新）     |
+| 前端 HTML（`HTML/*.html`）             | ❌ 不需要（自动注入版本号）             |
+| 添加新的静态资源 / 路由                    | ✅ 需要重启                      |
+
+### 重启命令
+
+#### 后端（端口 8000）
+
+```powershell
+# Windows PowerShell — 杀掉旧进程并重启
+Get-NetTCPConnection -State Listen -LocalPort 8000 -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Set-Location backend
+Start-Process -FilePath "python" -ArgumentList "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" -WindowStyle Hidden
+```
+
+```bash
+# Linux / macOS
+lsof -ti:8000 | xargs kill -9 2>/dev/null
+cd backend
+nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > backend.log 2>&1 &
+```
+
+#### 前端（端口 5500）
+
+```powershell
+# Windows PowerShell — 杀掉旧进程并重启
+Get-NetTCPConnection -State Listen -LocalPort 5500 -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Set-Location <项目根目录>
+Start-Process -FilePath "python" -ArgumentList "serve_nocache.py", "5500" -WindowStyle Hidden
+```
+
+```bash
+# Linux / macOS
+lsof -ti:5500 | xargs kill -9 2>/dev/null
+cd <项目根目录>
+nohup python serve_nocache.py 5500 > frontend.log 2>&1 &
+```
+
+#### 一键重启（同时重启前后端）
+
+```powershell
+# Windows PowerShell
+Get-NetTCPConnection -State Listen -LocalPort 8000,5500 -ErrorAction SilentlyContinue |
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 1
+Start-Process -FilePath "python" -ArgumentList "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" -WorkingDirectory "$PWD\backend" -WindowStyle Hidden
+Start-Process -FilePath "python" -ArgumentList "serve_nocache.py", "5500" -WorkingDirectory "$PWD" -WindowStyle Hidden
+Start-Sleep -Seconds 3
+Write-Host "重启完成 — 后端: http://127.0.0.1:8000  前端: http://127.0.0.1:5500"
+```
+
+```bash
+# Linux / macOS
+lsof -ti:8000,5500 2>/dev/null | xargs kill -9 2>/dev/null
+sleep 1
+(cd backend && nohup python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload > backend.log 2>&1 &)
+nohup python serve_nocache.py 5500 > frontend.log 2>&1 &
+echo "重启完成 — 后端: http://127.0.0.1:8000  前端: http://127.0.0.1:5500"
+```
+
+#### 验证服务状态
+
+```powershell
+# Windows
+Get-NetTCPConnection -State Listen -LocalPort 8000,5500 |
+  Select-Object LocalPort, OwningProcess | Format-Table -AutoSize
+Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -UseBasicParsing
+```
+
+```bash
+# Linux / macOS
+curl -s http://127.0.0.1:8000/api/health
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5500/
+```
+
+***
+
 ## Docker 部署
 
 ```bash

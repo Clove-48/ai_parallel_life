@@ -32,7 +32,7 @@ const Store = (() => {
     return getStories().find(s => s.id === id) || null;
   }
 
-  /** 添加故事（按 id 去重，相同 id 则合并更新） */
+  /** 添加故事（按 id 去重，相同 id 则合并更新；相同内容哈希则只保留最新） */
   function addStory(story) {
     if (!story || !story.id) return;
     const stories = getStories();
@@ -40,10 +40,95 @@ const Store = (() => {
     if (idx !== -1) {
       // 已存在 — 合并更新（不新增重复）
       stories[idx] = { ...stories[idx], ...story };
-    } else {
-      stories.unshift(story);
+      saveStories(stories);
+      return;
     }
+
+    // 兜底：内容级别去重（处理 mock data UUID 不同的场景）
+    // 用标题 + node 关键字段做指纹，同一故事多次成功不应产生多条
+    const fp = _storyFingerprint(story);
+    if (fp) {
+      const dupIdx = stories.findIndex(s => !s._pending && _storyFingerprint(s) === fp);
+      if (dupIdx !== -1) {
+        // 已有相同内容的故事 — 用新数据更新旧的，避免重复
+        stories[dupIdx] = { ...stories[dupIdx], ...story };
+        saveStories(stories);
+        return;
+      }
+    }
+
+    stories.unshift(story);
     saveStories(stories);
+  }
+
+  /** 计算故事内容指纹（用于内容级别去重） */
+  function _storyFingerprint(story) {
+    if (!story) return '';
+    // pending 占位不参与去重
+    if (story._pending) return '';
+    const n = story.node || {};
+    // 关键字段组合：时间/地点/选择 + 标题
+    const parts = [
+      n.time || '',
+      n.location || '',
+      n.choiceA || '',
+      n.choiceB || '',
+      n.actualChoice || '',
+      n.actualOutcome || '',
+      (story.title || '').replace(/\s+/g, ''),
+    ];
+    return parts.join('|');
+  }
+
+  /**
+   * 清理重复的故事（按内容指纹合并）
+   * - 在应用启动时调用一次，修复历史遗留的重复记录
+   * - pending 记录保留不动
+   * @returns {{ removed: number, merged: number }}
+   */
+  function dedupStories() {
+    const stories = getStories();
+    const seen = new Map(); // fingerprint -> 最新故事
+    const kept = [];
+    let removed = 0;
+
+    // 按创建时间倒序遍历，保留最新
+    const sorted = [...stories].sort((a, b) => {
+      const ta = new Date(a.createdAt || 0).getTime();
+      const tb = new Date(b.createdAt || 0).getTime();
+      return tb - ta;
+    });
+
+    for (const s of sorted) {
+      if (s._pending) {
+        // pending 单独保留
+        if (!kept.find(k => k.id === s.id)) kept.push(s);
+        continue;
+      }
+      const fp = _storyFingerprint(s);
+      if (!fp) {
+        if (!kept.find(k => k.id === s.id)) kept.push(s);
+        continue;
+      }
+      if (seen.has(fp)) {
+        // 已有更新的，跳过
+        removed++;
+        continue;
+      }
+      seen.set(fp, s);
+      kept.push(s);
+    }
+
+    if (removed > 0) {
+      // 保持按 createdAt 倒序
+      kept.sort((a, b) => {
+        const ta = new Date(a.createdAt || 0).getTime();
+        const tb = new Date(b.createdAt || 0).getTime();
+        return tb - ta;
+      });
+      saveStories(kept);
+    }
+    return { removed, merged: 0 };
   }
 
   /** 更新故事 */
@@ -156,6 +241,7 @@ const Store = (() => {
     updateStory,
     deleteStory,
     saveStories,
+    dedupStories,
     setCurrentStoryId,
     setChatMessages,
     addChatMessage,

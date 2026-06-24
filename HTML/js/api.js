@@ -248,9 +248,9 @@ const API = (() => {
   /** 从后端获取单个故事详情 */
   async function fetchStory(id) {
     try {
-      const res = await fetch(`${BASE_URL}/stories/${id}`, {
-        signal: AbortSignal.timeout(5000),
-      });
+      // 不设 AbortSignal.timeout：之前的 5s 强制超时在慢网下会自己 abort 请求，
+      // 在浏览器控制台留下 net::ERR_ABORTED 噪声。让请求自然完成，失败由后端超时保护。
+      const res = await fetch(`${BASE_URL}/stories/${id}`);
       if (res.ok) {
         return await res.json();
       }
@@ -290,6 +290,21 @@ const API = (() => {
     const signal = internalController.signal;
 
     let lastError = null;
+    let errored = false;  // 标记是否收到错误事件（防止后续 done 误触发）
+
+    // 兜底：检测 token 内容是否为错误信息
+    // 后端旧版本可能把错误作为普通 token yield 出来，这里做最后一道防线
+    const looksLikeErrorToken = (text) => {
+      if (!text || typeof text !== 'string') return false;
+      const t = text.trim();
+      return t.startsWith('（连接出错') ||
+             t.startsWith('（AI 响应出错') ||
+             t.startsWith('（AI 调用失败') ||
+             t.startsWith('对不起，API 配置未完成') ||
+             t.includes('getaddrinfo failed') ||
+             t.includes('ConnectionError') ||
+             t.includes('API 错误');
+    };
 
     const attempt = async (retryCount = 0) => {
       if (signal.aborted) return; // 已被外部中止，直接返回（不重试、不报错）
@@ -319,6 +334,7 @@ const API = (() => {
         const decoder = new TextDecoder();
         let buffer = '';
         let firstTokenReceived = false;
+        let pendingEvent = null;  // 跟踪 SSE 事件类型（event: xxx）
 
         while (true) {
           const { done, value } = await reader.read();
@@ -331,12 +347,32 @@ const API = (() => {
 
           for (const line of lines) {
             const trimmed = line.trim();
+            if (!trimmed) continue;
+            // SSE 事件类型行
+            if (trimmed.startsWith('event:')) {
+              pendingEvent = trimmed.slice(6).trim();
+              continue;
+            }
             if (!trimmed.startsWith('data: ')) continue;
             try {
               const data = JSON.parse(trimmed.slice(6));
+              const eventType = pendingEvent || 'message';
+              pendingEvent = null;
+
+              // 关键：处理后端发来的 error 事件
+              if (eventType === 'error' || data.error) {
+                errored = true;
+                reader.cancel().catch(() => {});
+                const msg = (data && (data.message || data.error)) || '连接中断';
+                onError && onError(msg);
+                return;
+              }
+
               if (data.done) {
                 // 释放 reader 锁，确保 SSE 连接关闭后再触发后续请求
                 reader.cancel().catch(() => {});
+                // 防御：如果之前已标记错误，不触发 onDone
+                if (errored) return;
                 onDone && onDone({
                   complete: data.complete || false,
                   fields: data.fields || {},
@@ -346,6 +382,14 @@ const API = (() => {
               }
               if (data.token) {
                 firstTokenReceived = true;
+                // 兜底：如果 token 看起来像错误（旧后端兼容），升级为 error
+                if (looksLikeErrorToken(data.token)) {
+                  errored = true;
+                  reader.cancel().catch(() => {});
+                  const msg = data.token.replace(/^[（(]/, '').replace(/[)）]$/, '').trim() || '网络连接失败';
+                  onError && onError(msg);
+                  return;
+                }
                 onToken && onToken(data.token);
               }
             } catch { /* skip malformed */ }

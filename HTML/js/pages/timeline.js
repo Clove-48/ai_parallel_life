@@ -11,6 +11,15 @@ const TimelinePage = {
     this.storyId = id;
     let story = Store.getStory(id);
 
+    // pending 记录只存在于本地（后端没有该 story）
+    // 不要去后端拉 — 否则会产生 404 + ERR_ABORTED 噪声
+    if (story && story._pending) {
+      return `<div class="page page-timeline"><div class="container" style="padding:4rem 2rem;text-align:center;color:var(--muted)">
+        <p>这个故事还没生成完，回到聊天继续推演吧。</p>
+        <button class="btn-primary" onclick="Router.navigate('chat')" style="margin-top:1rem;">回到聊天</button>
+      </div></div>`;
+    }
+
     // 本地没有 OR 本地数据不完整（缺 node）→ 主动从后端拉详情
     const needFetch = !story
       || !story.node

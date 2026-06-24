@@ -100,12 +100,24 @@ async def chat_stream_endpoint(body: ChatRequest):
 
     async def event_stream():
         buffer = ""
+        had_error = False
         try:
             async for token in chat_stream(messages):
+                # 关键：chat_service 在 LLM 上游失败时会 yield 错误文本，
+                # 这里必须识别并升级为 SSE error 事件，否则前端会把它当正常 AI 回复显示
+                if token and (token.startswith("（连接出错") or token.startswith("（AI 响应出错") or token.startswith("对不起，API 配置未完成")):
+                    had_error = True
+                    msg = token.strip("（）")
+                    yield f"event: error\ndata: {json.dumps({'message': msg}, ensure_ascii=False)}\n\n"
+                    return
                 buffer += token
                 yield f"data: {json.dumps({'token': token, 'done': False}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'token': '（连接出错，请重试）', 'done': False})}\n\n"
+            had_error = True
+            yield f"event: error\ndata: {json.dumps({'message': f'聊天服务异常: {str(e)}'}, ensure_ascii=False)}\n\n"
+            return
+
+        if had_error:
             return
 
         # 流结束后，检查完成标记

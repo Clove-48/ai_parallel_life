@@ -1927,20 +1927,126 @@ img { max-width: 100%; display: block; }
 }
 
 .history-item .delete-btn {
-  width: 32px; height: 32px;
-  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 32px;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.78rem;
+  color: var(--ink-tertiary);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all var(--dur-fast) var(--ease-out);
+  flex-shrink: 0;
+  cursor: pointer;
+  font-weight: 500;
+}
+.history-item .delete-btn .delete-btn-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.history-item .delete-btn:hover {
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.08);
+  border-color: rgba(192, 57, 43, 0.25);
+}
+.history-item .delete-btn:active {
+  transform: scale(0.96);
+}
+
+/* 历史确认弹窗 */
+.history-confirm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
-  color: var(--ink-tertiary);
-  transition: all var(--dur-fast) var(--ease-out);
-  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease-out);
+  pointer-events: none;
 }
-
-.history-item .delete-btn:hover {
-  color: #c0392b;
-  background: rgba(192, 57, 43, 0.06);
+.history-confirm-modal.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.history-confirm-modal .history-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.history-confirm-modal .history-confirm-card {
+  position: relative;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--hairline, rgba(0,0,0,0.08));
+  border-radius: 14px;
+  padding: 1.6rem 1.5rem 1.2rem;
+  width: min(320px, 86vw);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  text-align: center;
+  transform: scale(0.92);
+  transition: transform 0.2s var(--ease-out);
+}
+.history-confirm-modal.show .history-confirm-card {
+  transform: scale(1);
+}
+.history-confirm-icon {
+  font-size: 2rem;
+  margin-bottom: 0.6rem;
+  line-height: 1;
+}
+.history-confirm-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink-strong, #222);
+  margin-bottom: 0.3rem;
+}
+.history-confirm-sub {
+  font-size: 0.85rem;
+  color: var(--ink-muted, #888);
+  margin-bottom: 1.2rem;
+  line-height: 1.5;
+}
+.history-confirm-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+}
+.history-confirm-cancel,
+.history-confirm-ok {
+  flex: 1;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-pill, 999px);
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--dur-fast, 0.2s) var(--ease-out);
+}
+.history-confirm-cancel {
+  background: transparent;
+  border-color: var(--hairline-strong, #ddd);
+  color: var(--ink-muted, #666);
+}
+.history-confirm-cancel:hover {
+  background: var(--hairline-soft, #f5f5f5);
+  color: var(--ink-strong, #222);
+}
+.history-confirm-ok {
+  background: linear-gradient(135deg, #c0392b, #d44232);
+  color: #fff;
+  border-color: #c0392b;
+}
+.history-confirm-ok:hover {
+  background: linear-gradient(135deg, #a82e1f, #c0392b);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(192, 57, 43, 0.32);
+}
+.history-confirm-ok:active {
+  transform: translateY(0) scale(0.98);
 }
 
 .history-empty {
@@ -2330,6 +2436,72 @@ img { max-width: 100%; display: block; }
   background: linear-gradient(135deg, rgba(255, 248, 240, 0.95), rgba(252, 240, 220, 0.85));
   border: 1px solid var(--hairline-soft);
   max-width: 88%;
+}
+
+/* ===== Chat：AI 气泡后面的重试按钮（独立元素，醒目） ===== */
+.msg-retry-wrap.msg-retry-after-bubble {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.5rem 0 0.5rem 3.2rem;  /* 与 AI 气泡对齐（留出头像位置） */
+  margin-top: -0.2rem;
+  margin-bottom: 0.5rem;
+  animation: fadeIn 0.3s var(--ease-out);
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.btn-retry-after {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, rgba(200, 132, 44, 0.2), rgba(200, 132, 44, 0.1));
+  border: 1.5px solid rgba(200, 132, 44, 0.5);
+  color: var(--real-color);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+  box-shadow: 0 2px 8px rgba(200, 132, 44, 0.15);
+}
+.btn-retry-after:hover {
+  background: linear-gradient(135deg, rgba(200, 132, 44, 0.32), rgba(200, 132, 44, 0.2));
+  border-color: var(--real-color);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(200, 132, 44, 0.3);
+}
+.btn-retry-after:active {
+  transform: translateY(0) scale(0.97);
+}
+.btn-retry-after .retry-icon {
+  font-size: 1.05rem;
+  display: inline-block;
+}
+
+/* 重试按钮脉冲动画 — 网络失败时持续呼吸，强制吸引用户注意 */
+.btn-retry-after.btn-retry-pulse {
+  animation: retryPulse 1.6s ease-in-out infinite;
+}
+@keyframes retryPulse {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(200, 132, 44, 0.15), 0 0 0 0 rgba(200, 132, 44, 0.45);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 4px 18px rgba(200, 132, 44, 0.35), 0 0 0 10px rgba(200, 132, 44, 0);
+    transform: scale(1.04);
+  }
+}
+.btn-retry-after.btn-retry-pulse .retry-icon {
+  animation: retryIconSpin 1.6s linear infinite;
+}
+@keyframes retryIconSpin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .gen-status-bubble {

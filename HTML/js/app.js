@@ -119,6 +119,16 @@
 
   // 启动应用
   document.addEventListener('DOMContentLoaded', async () => {
+    // 先做一次本地去重，清理历史遗留的重复记录（不影响后端）
+    try {
+      const result = Store.dedupStories();
+      if (result.removed > 0) {
+        console.log(`[dedup] 启动时清理了 ${result.removed} 条重复记录`);
+      }
+    } catch (e) {
+      console.warn('[dedup] 去重失败:', e);
+    }
+
     // 先异步从后端同步历史记录（不等完成，先开始播放动画）
     syncStoriesFromBackend();
 
