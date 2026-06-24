@@ -120,7 +120,33 @@ const ChatPage = {
         input.style.height = 'auto';
         return;
       }
-      if (this.isWaiting) return;
+
+      // 兜底：isWaiting 卡住时强制重置
+      // 真实场景：上一条 SSE 流被外部 abort 但 onError 静默不触发，
+      // 导致 isWaiting 永远为 true → 用户后续所有 send 都被 if (this.isWaiting) return 吃掉
+      // 表现为"回车没反应 / 发送按钮没反应"
+      if (this.isWaiting) {
+        console.warn('[chat] isWaiting 卡住，强制重置（abort 静默导致）');
+        if (this._abortController) {
+          try { this._abortController.abort(); } catch (e) { /* ignore */ }
+          this._abortController = null;
+        }
+        this.isWaiting = false;
+      }
+
+      // 输入框被禁用（isComplete 后）时也兜底启用 — 防止 LLM 误判 complete 后用户无法继续
+      if (input.disabled) {
+        input.disabled = false;
+        input.placeholder = '说说你的回忆…';
+        if (sendBtn) sendBtn.style.opacity = '';
+        const attachBtnEl = document.getElementById('chat-attach');
+        if (attachBtnEl) {
+          attachBtnEl.style.opacity = '';
+          attachBtnEl.style.pointerEvents = '';
+        }
+        this.isComplete = false;  // 误判就清掉，让用户能继续
+      }
+
       const text = Helpers.sanitizeInput(raw, 500);
       input.value = '';
       input.style.height = 'auto';
@@ -187,6 +213,29 @@ const ChatPage = {
       // 恢复时仍创建 controller（虽然不用，但保持一致性）
       this._abortController = new AbortController();
     }
+
+    // 看门狗：90s 内 isWaiting 还没解除就强制重置
+    // （防止上一条 SSE 流因网络/上游异常卡死，导致用户再按回车被卡住）
+    if (this._waitingWatchdog) clearInterval(this._waitingWatchdog);
+    this._waitingWatchdog = setInterval(() => {
+      if (this._pageUnmounted) {
+        clearInterval(this._waitingWatchdog);
+        this._waitingWatchdog = null;
+        return;
+      }
+      if (this.isWaiting) {
+        console.warn('[chat] 看门狗触发：isWaiting 超过 90s 未解除，强制重置');
+        if (this._abortController) {
+          try { this._abortController.abort(); } catch (e) { /* ignore */ }
+          this._abortController = null;
+        }
+        this.isWaiting = false;
+        // 提示用户
+        if (window.GlobalToast) {
+          window.GlobalToast.warning('连接超时，请重新发送');
+        }
+      }
+    }, 90000);
   },
 
   /** 转义 HTML 特殊字符 */
@@ -1171,20 +1220,52 @@ const ChatPage = {
     this.uploadedMedia = saved.uploadedMedia || [];
 
     if (this.isComplete) {
-      // 之前已经收齐 → 显示"开始推演"按钮
+      // 之前已经收齐（LLM 输出过 [收集完成]）→ 显示"开始推演"按钮
       this._showGeneratePrompt(container, input);
     } else {
-      // 检查是否消息数足够（≥ 4 条用户消息）— 兜底让用户手动选择推演
+      // 中途退出 — 默认继续对话
+      // 之前的逻辑是"用户消息 ≥ 3 就强制标 complete 并显示推演卡片"，
+      // 这跟"中途退出应该继续对话"的预期相反，改为：
+      //   - 不再强制 complete
+      //   - 如果用户消息 ≥ 5，在输入框旁显示一个**手动**的"我已说完"小入口
+      //   - 用户主动点了才走推演流程
       const userMsgCount = this.messages.filter(m => m.role === 'user').length;
-      if (userMsgCount >= 3) {
-        // 之前聊得差不多了但没标记完成 → 允许手动推演
-        this.isComplete = true;
-        this._showGeneratePrompt(container, input, true);
-      } else {
-        // 继续输入
-        this.isWaiting = false;
-        setTimeout(() => input.focus(), 100);
+      if (userMsgCount >= 5) {
+        this._showManualFinishHint(container, input, userMsgCount);
       }
+      this.isWaiting = false;
+      setTimeout(() => input.focus(), 100);
+    }
+  },
+
+  /** 在输入框旁显示一个小的"我已说完，主动推演"入口（仅在用户消息 ≥ 5 时显示） */
+  _showManualFinishHint(container, input, userMsgCount) {
+    // 避免重复渲染
+    if (document.getElementById('chat-manual-finish')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'chat-manual-finish';
+    wrap.style.cssText = 'padding:0.4rem 1.2rem 0.2rem;display:flex;justify-content:center;';
+    wrap.innerHTML = `
+      <button type="button" class="chat-manual-finish-btn" style="background:transparent;border:1px dashed rgba(200,132,44,0.4);color:var(--muted);font-size:0.78rem;padding:0.3rem 0.9rem;border-radius:999px;cursor:pointer;transition:all 0.2s;">
+        ✓ 我已说完，开始推演（已聊 ${userMsgCount} 句）
+      </button>
+    `;
+    const btn = wrap.querySelector('button');
+    btn.onmouseenter = () => { btn.style.borderColor = 'rgba(200,132,44,0.8)'; btn.style.color = 'var(--primary)'; };
+    btn.onmouseleave = () => { btn.style.borderColor = 'rgba(200,132,44,0.4)'; btn.style.color = 'var(--muted)'; };
+    btn.onclick = () => {
+      this.isComplete = true;
+      this._saveSession();
+      this._showGeneratePrompt(container, input, true);
+    };
+    // 插在消息容器之后、输入框之前
+    const inputWrap = input?.closest('.chat-input-wrap, .chat-input-container, .chat-input, .input-area, form, .composer')
+      || input?.parentElement;
+    if (inputWrap && inputWrap.parentElement) {
+      inputWrap.parentElement.insertBefore(wrap, inputWrap);
+    } else {
+      // 兜底：直接放到 body 末尾（最差体验，但不会出错）
+      document.body.appendChild(wrap);
     }
   },
 
@@ -1326,6 +1407,10 @@ const ChatPage = {
     if (this._initTimer) {
       clearTimeout(this._initTimer);
       this._initTimer = null;
+    }
+    if (this._waitingWatchdog) {
+      clearInterval(this._waitingWatchdog);
+      this._waitingWatchdog = null;
     }
     if (this._abortController) {
       this._abortController.abort();
