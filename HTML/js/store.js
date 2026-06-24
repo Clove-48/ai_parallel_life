@@ -143,8 +143,46 @@ const Store = (() => {
 
   /** 删除故事 */
   function deleteStory(id) {
+    if (!id) return;
     const stories = getStories().filter(s => s.id !== id);
     saveStories(stories);
+    // 同时把 ID 加进"已删除"列表，永久屏蔽同步时被后端拉回
+    addDeletedId(id);
+  }
+
+  /** 已删除 ID 列表的存储 key */
+  const DELETED_KEY = 'parallel_life_deleted_ids';
+
+  /** 获取已删除 ID 列表（用于屏蔽后端同步） */
+  function getDeletedIds() {
+    return Helpers.storage.get(DELETED_KEY, []);
+  }
+
+  /** 把 ID 加进已删除列表（去重） */
+  function addDeletedId(id) {
+    if (!id) return;
+    const ids = getDeletedIds();
+    if (ids.includes(id)) return;
+    ids.push(id);
+    // 最多保留 500 条历史，避免无限增长
+    const trimmed = ids.slice(-500);
+    try { localStorage.setItem(DELETED_KEY, JSON.stringify(trimmed)); } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * 从已删除列表中清除 ID（如果想"恢复"某条记录时调用）
+   * — 一般用于用户主动恢复 / 调试
+   */
+  function removeDeletedId(id) {
+    if (!id) return;
+    const ids = getDeletedIds().filter(x => x !== id);
+    try { localStorage.setItem(DELETED_KEY, JSON.stringify(ids)); } catch (e) { /* ignore */ }
+  }
+
+  /** 判断一个 ID 是否在已删除列表中（应被同步逻辑跳过） */
+  function isDeletedId(id) {
+    if (!id) return false;
+    return getDeletedIds().includes(id);
   }
 
   /** 设置当前故事 ID */
@@ -242,6 +280,10 @@ const Store = (() => {
     deleteStory,
     saveStories,
     dedupStories,
+    getDeletedIds,
+    addDeletedId,
+    removeDeletedId,
+    isDeletedId,
     setCurrentStoryId,
     setChatMessages,
     addChatMessage,

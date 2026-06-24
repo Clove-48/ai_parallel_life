@@ -63,10 +63,20 @@
       const remoteList = await API.fetchStories();
       console.log('[sync] 后端故事列表：', remoteList.length, '条');
       if (!Array.isArray(remoteList) || remoteList.length === 0) return;
+      // 读取已删除 ID 列表 — 用户主动删过的故事不应被后端再次拉回
+      const deletedIds = new Set(Store.getDeletedIds());
+      if (deletedIds.size > 0) {
+        console.log('[sync] 跳过', deletedIds.size, '个用户已删除的 ID');
+      }
       const localStories = Store.getStories();
       const localById = new Map(localStories.map(s => [s.id, s]));
-      let added = 0, updated = 0;
+      let added = 0, updated = 0, skipped = 0;
       for (const item of remoteList) {
+        // 已被用户删除的 ID → 跳过（不拉取、不写入）
+        if (deletedIds.has(item.id)) {
+          skipped++;
+          continue;
+        }
         // 拉详情以拿到完整 narratives / reflection / chatMessages / node
         let remote = null;
         try {
@@ -76,6 +86,11 @@
           continue;
         }
         if (!remote) continue;
+        // 拉回来的详情里也要再查一次（防止 detail 也带相同 id）
+        if (deletedIds.has(remote.id)) {
+          skipped++;
+          continue;
+        }
         // 转成前端 store 格式（确保每个字段都存在）
         const fullStory = {
           id: remote.id,
@@ -111,7 +126,7 @@
           }
         }
       }
-      console.log(`[sync] 同步完成 — 新增 ${added} 条，更新 ${updated} 条`);
+      console.log(`[sync] 同步完成 — 新增 ${added} 条，更新 ${updated} 条，跳过 ${skipped} 条已删除`);
     } catch (e) {
       console.warn('[sync] 同步历史记录失败：', e.message);
     }
