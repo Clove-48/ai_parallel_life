@@ -24,17 +24,31 @@ const Store = (() => {
 
   /** 保存故事列表（覆盖式，用于从后端同步） */
   function saveStories(stories) {
+    // 入口处过滤"已删除"黑名单 — 任何路径调用 saveStories 都不会把已删的故事写回来
+    if (Array.isArray(stories) && deletedIdSet.size > 0) {
+      const before = stories.length;
+      stories = stories.filter(s => s && s.id && !deletedIdSet.has(s.id));
+      if (stories.length !== before) {
+        console.log(`[Store] saveStories 过滤掉 ${before - stories.length} 个已删除 ID`);
+      }
+    }
     Helpers.storage.set(STORAGE_KEY, stories);
     notify('stories');
   }
 
   function getStory(id) {
+    if (!id || deletedIdSet.has(id)) return null;  // 黑名单中的 ID 直接返回 null
     return getStories().find(s => s.id === id) || null;
   }
 
   /** 添加故事（按 id 去重，相同 id 则合并更新；相同内容哈希则只保留最新） */
   function addStory(story) {
     if (!story || !story.id) return;
+    // 入口处检查黑名单 — 已被用户删除的故事绝不允许被任何路径加回来
+    if (deletedIdSet.has(story.id)) {
+      console.log(`[Store] 拒绝添加已删除的故事: ${story.id}`);
+      return;
+    }
     const stories = getStories();
     const idx = stories.findIndex(s => s.id === story.id);
     if (idx !== -1) {
@@ -153,20 +167,31 @@ const Store = (() => {
   /** 已删除 ID 列表的存储 key */
   const DELETED_KEY = 'parallel_life_deleted_ids';
 
+  // 启动时从 localStorage 加载已删除 ID 集合（内存级 cache，避免每次 filter 都读 storage）
+  let _deletedIdList = [];
+  try {
+    const raw = localStorage.getItem(DELETED_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) _deletedIdList = arr.filter(x => typeof x === 'string');
+    }
+  } catch (e) { /* ignore */ }
+  const deletedIdSet = new Set(_deletedIdList);
+
   /** 获取已删除 ID 列表（用于屏蔽后端同步） */
   function getDeletedIds() {
-    return Helpers.storage.get(DELETED_KEY, []);
+    return _deletedIdList.slice();
   }
 
   /** 把 ID 加进已删除列表（去重） */
   function addDeletedId(id) {
     if (!id) return;
-    const ids = getDeletedIds();
-    if (ids.includes(id)) return;
-    ids.push(id);
+    if (deletedIdSet.has(id)) return;
+    deletedIdSet.add(id);
+    _deletedIdList.push(id);
     // 最多保留 500 条历史，避免无限增长
-    const trimmed = ids.slice(-500);
-    try { localStorage.setItem(DELETED_KEY, JSON.stringify(trimmed)); } catch (e) { /* ignore */ }
+    _deletedIdList = _deletedIdList.slice(-500);
+    try { localStorage.setItem(DELETED_KEY, JSON.stringify(_deletedIdList)); } catch (e) { /* ignore */ }
   }
 
   /**
@@ -175,14 +200,16 @@ const Store = (() => {
    */
   function removeDeletedId(id) {
     if (!id) return;
-    const ids = getDeletedIds().filter(x => x !== id);
-    try { localStorage.setItem(DELETED_KEY, JSON.stringify(ids)); } catch (e) { /* ignore */ }
+    if (!deletedIdSet.has(id)) return;
+    deletedIdSet.delete(id);
+    _deletedIdList = _deletedIdList.filter(x => x !== id);
+    try { localStorage.setItem(DELETED_KEY, JSON.stringify(_deletedIdList)); } catch (e) { /* ignore */ }
   }
 
   /** 判断一个 ID 是否在已删除列表中（应被同步逻辑跳过） */
   function isDeletedId(id) {
     if (!id) return false;
-    return getDeletedIds().includes(id);
+    return deletedIdSet.has(id);
   }
 
   /** 设置当前故事 ID */

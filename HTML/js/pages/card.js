@@ -43,7 +43,13 @@ const CardPage = {
 
     const ref = story.reflection || {};
     // 关键词对比：根据故事节点 + 反思内容动态变化，避免所有卡片都长得一样
-    const keywords = ref.keywords || this._deriveKeywords(story);
+    let keywords = ref.keywords || this._deriveKeywords(story);
+    // 兜底：后端偶尔返回 keywords 缺字段或非数组 — 补成空数组，避免 .map 报错
+    if (!keywords || typeof keywords !== 'object') {
+      keywords = { real: [], parallel: [] };
+    }
+    if (!Array.isArray(keywords.real)) keywords.real = [];
+    if (!Array.isArray(keywords.parallel)) keywords.parallel = [];
 
     return `
     <div class="page page-card">
@@ -136,6 +142,11 @@ const CardPage = {
     const id = params[0];
     const story = Store.getStory(id);
 
+    if (!story) {
+      // "故事未找到" 模板只用了 inline onclick，mount 阶段不绑事件 — 直接返回
+      return;
+    }
+
     if (story) {
       // 在 Canvas 上绘制卡片
       const canvas = document.getElementById('reflection-canvas');
@@ -145,16 +156,23 @@ const CardPage = {
     }
 
     // 翻转 — 使用 2D class 切换替代 3D transform
+    // 元素可能在"故事未找到"模板里不存在 — 必须先检查
     this._isFlipped = false;
     const flipInner = document.getElementById('flip-inner');
-    document.getElementById('flip-to-back').onclick = () => {
-      this._isFlipped = true;
-      flipInner.classList.add('flipped');
-    };
-    document.getElementById('flip-to-front').onclick = () => {
-      this._isFlipped = false;
-      flipInner.classList.remove('flipped');
-    };
+    const flipToBack = document.getElementById('flip-to-back');
+    const flipToFront = document.getElementById('flip-to-front');
+    if (flipToBack && flipInner) {
+      flipToBack.onclick = () => {
+        this._isFlipped = true;
+        flipInner.classList.add('flipped');
+      };
+    }
+    if (flipToFront && flipInner) {
+      flipToFront.onclick = () => {
+        this._isFlipped = false;
+        flipInner.classList.remove('flipped');
+      };
+    }
 
     // 分享
     document.getElementById('card-share').onclick = () => {

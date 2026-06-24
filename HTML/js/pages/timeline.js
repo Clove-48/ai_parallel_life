@@ -208,7 +208,9 @@ const TimelinePage = {
     const id = params[0];
     this.storyId = id;
 
-    document.getElementById('tl-back').onclick = () => Router.goBack('');
+    // "故事未找到" 等异常模板下，#tl-back 等元素可能不存在 — 全部 null-check 绑事件
+    const tlBack = document.getElementById('tl-back');
+    if (tlBack) tlBack.onclick = () => Router.goBack('');
 
     // 绑定"查看感悟卡片"按钮
     this._bindCardButton();
